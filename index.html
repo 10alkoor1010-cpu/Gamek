@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>مغامرة كرمبة - الشفرات والدجاجة</title>
+<style>
+* {
+box-sizing: border-box;
+margin: 0;
+padding: 0;
+user-select: none;
+-webkit-user-select: none;
+touch-action: none;
+}
+body {
+background: #0f141c;
+font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: flex-start;
+min-height: 100vh;
+color: #fff;
+padding: 10px;
+overflow-x: hidden;
+}
+h1 {
+margin: 6px 0 10px 0;
+font-size: 19px;
+color: #f39c12;
+text-align: center;
+text-shadow: 1px 1px 3px #000;
+}
+#game-container {
+position: relative;
+width: 100%;
+max-width: 500px;
+height: 330px;
+background: linear-gradient(to bottom, #1e272e, #2f3640 70%, #192a56 70%);
+border: 3px solid #e67e22;
+border-radius: 12px;
+overflow: hidden;
+box-shadow: 0 8px 24px rgba(0,0,0,0.7);
+}
+canvas {
+display: block;
+width: 100%;
+height: 100%;
+}
+/* شاشة البداية لتجاوز قيود المتصفحات على GitHub */
+#startOverlay {
+position: absolute;
+top: 0;
+left: 0;
+width: 100%;
+height: 100%;
+background: rgba(15, 20, 28, 0.88);
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+z-index: 10;
+}
+#startBtn {
+padding: 14px 28px;
+font-size: 20px;
+font-weight: bold;
+color: #fff;
+background: linear-gradient(135deg, #f39c12, #d35400);
+border: none;
+border-radius: 30px;
+box-shadow: 0 5px 15px rgba(243, 156, 18, 0.5);
+cursor: pointer;
+margin-top: 15px;
+}
+.mobile-controls {
+display: flex;
+justify-content: space-between;
+width: 100%;
+max-width: 500px;
+margin-top: 12px;
+gap: 12px;
+}
+.btn {
+flex: 1;
+padding: 15px 0;
+font-size: 17px;
+font-weight: bold;
+border: none;
+border-radius: 12px;
+color: #fff;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+cursor: pointer;
+box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+}
+.btn:active {
+transform: scale(0.96);
+filter: brightness(0.85);
+}
+.btn-jump {
+background: linear-gradient(135deg, #e67e22, #d35400);
+border-bottom: 4px solid #962d22;
+}
+.btn-duck {
+background: linear-gradient(135deg, #c0392b, #962d22);
+border-bottom: 4px solid #5f1810;
+}
+.btn span {
+font-size: 11px;
+opacity: 0.9;
+margin-top: 2px;
+font-weight: normal;
+}
+</style>
+</head>
+<body>
+
+<h1>🍗 مغامرة كرمبة - الشفرات والدجاجة</h1>
+
+<div id="game-container">
+<div id="startOverlay">
+<h2 style="color: #f1c40f; margin-bottom: 6px;">مرحباً بك مع كرمبة!</h2>
+<p style="font-size: 13px; color: #dfe6e9;">تخطَّ 12 منشاراً ومسماراً لتنال الدجاجة المحمرة</p>
+<button id="startBtn">🍗 اضغط لبدء اللعبة</button>
+</div>
+<canvas id="gameCanvas" width="500" height="330"></canvas>
+</div>
+
+<div class="mobile-controls">
+<button class="btn btn-duck" id="duckBtn">
+⬇ انبطاح
+<span>نار واحتكاك ضد المناشير 🔥</span>
+</button>
+<button class="btn btn-jump" id="jumpBtn">
+⬆ قفز
+<span>قفز وسيجارة فوق المسامير 🚬</span>
+</button>
+</div>
+
+<script>
+window.addEventListener('load', () => {
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const startOverlay = document.getElementById('startOverlay');
+const startBtn = document.getElementById('startBtn');
+const jumpBtn = document.getElementById('jumpBtn');
+const duckBtn = document.getElementById('duckBtn');
+
+let gameStarted = false;
+const GROUND_Y = 255;
+const TARGET_OBSTACLES = 12;
+let obstaclesPassed = 0;
+let gameOver = false;
+let gameWon = false;
+let finishTriggered = false;
+let globalSawAngle = 0;
+
+// كرمبة
+const player = {
+x: 70,
+y: GROUND_Y - 78,
+standWidth: 56,
+standHeight: 78,
+duckWidth: 76,
+duckHeight: 38,
+width: 56,
+height: 78,
+vy: 0,
+jumpForce: -11.8,
+gravity: 0.62,
+isGrounded: true,
+isDucking: false,
+smokeParticles: [],
+fireParticles: []
+};
+
+let obstacles = [];
+let spawnTimer = 0;
+let finishLine = null;
+
+function startGame() {
+if (!gameStarted) {
+gameStarted = true;
+startOverlay.style.display = 'none';
+}
+}
+
+startBtn.addEventListener('click', startGame);
+startBtn.addEventListener('pointerdown', startGame);
+
+function doJump() {
+if (!gameStarted) { startGame(); return; }
+if (gameOver || gameWon) { resetGame(); return; }
+if (player.isGrounded && !player.isDucking) {
+player.vy = player.jumpForce;
+player.isGrounded = false;
+}
+}
+
+function startDuck() {
+if (!gameStarted) { startGame(); return; }
+if (gameOver || gameWon) { resetGame(); return; }
+if (player.isGrounded) {
+player.isDucking = true;
+player.height = player.duckHeight;
+player.width = player.duckWidth;
+player.y = GROUND_Y - player.duckHeight;
+}
+}
+
+function stopDuck() {
+if (player.isDucking) {
+player.isDucking = false;
+player.height = player.standHeight;
+player.width = player.standWidth;
+player.y = GROUND_Y - player.standHeight;
+}
+}
+
+jumpBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); doJump(); });
+duckBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); startDuck(); });
+duckBtn.addEventListener('pointerup', (e) => { e.preventDefault(); stopDuck(); });
+duckBtn.addEventListener('pointercancel', (e) => { e.preventDefault(); stopDuck(); });
+
+canvas.addEventListener('pointerdown', (e) => {
+e.preventDefault();
+if (!gameStarted) { startGame(); return; }
+if (gameOver || gameWon) { resetGame(); return; }
+const rect = canvas.getBoundingClientRect();
+const touchY = e.clientY - rect.top;
+if (touchY < rect.height / 2) {
+doJump();
+} else {
+startDuck();
+}
+});
+
+window.addEventListener('pointerup', stopDuck);
+
+window.addEventListener('keydown', (e) => {
+if (e.code === 'Space' || e.code === 'ArrowUp') {
+e.preventDefault();
+doJump();
+} else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+e.preventDefault();
+startDuck();
+}
+});
+
+window.addEventListener('keyup', (e) => {
+if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+stopDuck();
+}
+});
+
+function resetGame() {
+obstaclesPassed = 0;
+gameOver = false;
+gameWon = false;
+finishTriggered = false;
+finishLine = null;
+obstacles = [];
+stopDuck();
+player.y = GROUND_Y - player.standHeight;
+player.vy = 0;
+player.isGrounded = true;
+player.smokeParticles = [];
+player.fireParticles = [];
+spawnTimer = 0;
+}
+
+function drawCurlyTopHair(cx, cy) {
+ctx.fillStyle = '#1c1510';
+const curls = [
+{ dx: -13, dy: -12, r: 6.5 },
+{ dx: -7, dy: -18, r: 7.5 },
+{ dx: 0, dy: -20, r: 8 },
+{ dx: 7, dy: -18, r: 7.5 },
+{ dx: 13, dy: -12, r: 6.5 },
+{ dx: -4, dy: -13, r: 7 },
+{ dx: 4, dy: -13, r: 7 }
+ ];
+curls.forEach(c => {
+ctx.beginPath();
+ctx.arc(cx + c.dx, cy + c.dy, c.r, 0, Math.PI * 2);
+ctx.fill();
+});
+ctx.fillStyle = 'rgba(28, 21, 16, 0.4)';
+ctx.beginPath();
+ctx.arc(cx - 15, cy - 2, 4, 0, Math.PI * 2);
+ctx.arc(cx + 15, cy - 2, 4, 0, Math.PI * 2);
+ctx.fill();
+}
+
+function drawKoromba(x, y, isJumping, isDucking, happy = false) {
+ctx.save();
+ctx.translate(x, y);
+
+if (isDucking) {
+ctx.fillStyle = "rgba(0,0,0,0.3)";
+ctx.beginPath();
+ctx.ellipse(38, 36, 36, 5, 0, 0, Math.PI * 2);
+ctx.fill();
+
+ctx.fillStyle = '#b0b7bd';
+ctx.beginPath();
+ctx.ellipse(36, 23, 32, 14, 0, 0, Math.PI * 2);
+ctx.fill();
+
+ctx.fillStyle = '#1e2124';
+ctx.fillRect(0, 20, 22, 13);
+
+ctx.fillStyle = '#f1c398';
+ctx.beginPath();
+ctx.arc(58, 16, 15, 0, Math.PI * 2);
+ctx.fill();
+
+drawCurlyTopHair(58, 15);
+
+ctx.fillStyle = '#000';
+ctx.beginPath();
+ctx.arc(64, 15, 2.2, 0, Math.PI * 2);
+ctx.fill();
+
+if (gameStarted) {
+for (let i = 0; i < 3; i++) {
+player.fireParticles.push({
+px: x + 15 + Math.random() * 38,
+py: GROUND_Y - 2,
+vx: -2.5 - Math.random() * 3,
+vy: -Math.random() * 2,
+size: 3.5 + Math.random() * 5,
+life: 1,
+color: Math.random() > 0.4 ? '#e67e22' : '#f1c40f'
+});
+}
+}
+} else {
+if (isJumping) {
+ctx.fillStyle = "rgba(0,0,0,0.2)";
+ctx.beginPath();
+ctx.ellipse(28, GROUND_Y - y + 8, 22, 6, 0, 0, Math.PI * 2);
+ctx.fill();
+}
+
+ctx.fillStyle = '#1e2124';
+ctx.fillRect(11, 60, 15, 18);
+ctx.fillRect(30, 60, 15, 18);
+
+ctx.fillStyle = '#b0b7bd';
+ctx.beginPath();
+ctx.ellipse(28, 42, 26, 23, 0, 0, Math.PI * 2);
+ctx.fill();
+
+ctx.fillStyle = '#2980b9';
+ctx.beginPath();
+ctx.arc(19, 36, 2.5, 0, Math.PI * 2);
+ctx.fill();
+
+ctx.fillStyle = '#f1c398';
+ctx.beginPath();
+ctx.arc(28, 19, 17, 0, Math.PI * 2);
+ctx.fill();
+
+drawCurlyTopHair(28, 17);
+
+ctx.fillStyle = 'rgba(230, 115, 115, 0.4)';
+ctx.beginPath();
+ctx.arc(16, 21, 4, 0, Math.PI * 2);
+ctx.arc(40, 21, 4, 0, Math.PI * 2);
+ctx.fill();
+
+ctx.fillStyle = '#2c1e14';
+ctx.fillRect(19, 14, 6, 2);
+ctx.fillRect(31, 14, 6, 2);
+ctx.beginPath();
+ctx.arc(22, 18, 2.2, 0, Math.PI * 2);
+ctx.arc(34, 18, 2.2, 0, Math.PI * 2);
+ctx.fill();
+
+ctx.beginPath();
+if (happy) {
+ctx.strokeStyle = '#c0392b';
+ctx.lineWidth = 2.5;
+ctx.arc(28, 23, 6, 0, Math.PI);
+ctx.stroke();
+} else {
+ctx.strokeStyle = '#333';
+ctx.lineWidth = 1.8;
+ctx.arc(28, 25, 3.5, 0, Math.PI);
+ctx.stroke();
+}
+
+if (isJumping && !happy) {
+ctx.fillStyle = '#ffffff';
+ctx.fillRect(33, 24, 11, 2.5);
+ctx.fillStyle = '#e74c3c';
+ctx.fillRect(44, 24, 2.5, 2.5);
+
+if (Math.random() < 0.75) {
+player.smokeParticles.push({
+px: x + 47,
+py: y + 25,
+size: 2.5 + Math.random() * 3.5,
+alpha: 1,
+vx: (Math.random() - 0.5) * 1.5 - 1.2,
+vy: -1.2 - Math.random() * 1.2
+});
+}
+}
+
+ctx.fillStyle = '#b0b7bd';
+ctx.beginPath();
+if (happy) {
+ctx.arc(5, 22, 7, 0, Math.PI * 2);
+ctx.arc(51, 22, 7, 0, Math.PI * 2);
+} else {
+ctx.arc(6, 40, 7, 0, Math.PI * 2);
+ctx.arc(50, 40, 7, 0, Math.PI * 2);
+}
+ctx.fill();
+}
+
+ctx.restore();
+}
+
+function drawSpikeHazard(obs) {
+if (obs.type === 'jump') {
+ctx.save();
+const spikeW = obs.w / 3;
+for (let i = 0; i < 3; i++) {
+const sx = obs.x + i * spikeW;
+const grad = ctx.createLinearGradient(sx, obs.y + obs.h, sx + spikeW, obs.y);
+grad.addColorStop(0, '#57606f');
+grad.addColorStop(0.5, '#f1f2f6');
+grad.addColorStop(1, '#ff4757');
+ctx.fillStyle = grad;
+
+ctx.beginPath();
+ctx.moveTo(sx, obs.y + obs.h);
+ctx.lineTo(sx + spikeW / 2, obs.y);
+ctx.lineTo(sx + spikeW, obs.y + obs.h);
+ctx.closePath();
+ctx.fill();
+ctx.strokeStyle = '#2f3542';
+ctx.lineWidth = 1;
+ctx.stroke();
+}
+ctx.restore();
+} else {
+ctx.save();
+const cx = obs.x + obs.w / 2;
+const cy = obs.y + obs.h / 2;
+const radius = obs.w / 2;
+
+ctx.strokeStyle = '#747d8c';
+ctx.lineWidth = 3;
+ctx.beginPath();
+ctx.moveTo(cx, 0);
+ctx.lineTo(cx, cy);
+ctx.stroke();
+
+ctx.translate(cx, cy);
+ctx.rotate(globalSawAngle);
+
+ctx.fillStyle = '#ced6e0';
+ctx.beginPath();
+const teeth = 8;
+for (let t = 0; t < teeth; t++) {
+const a = (t / teeth) * Math.PI * 2;
+const aNext = ((t + 0.5) / teeth) * Math.PI * 2;
+ctx.lineTo(Math.cos(a) * radius, Math.sin(a) * radius);
+ctx.lineTo(Math.cos(aNext) * (radius - 8), Math.sin(aNext) * (radius - 8));
+}
+ctx.closePath();
+ctx.fill();
+ctx.strokeStyle = '#ff4757';
+ctx.lineWidth = 1.5;
+ctx.stroke();
+
+ctx.fillStyle = '#2f3542';
+ctx.beginPath();
+ctx.arc(0, 0, 5, 0, Math.PI * 2);
+ctx.fill();
+
+ctx.restore();
+}
+}
+
+function drawRoastedChicken(cx, cy) {
+ctx.save();
+ctx.fillStyle = "#dfe6e9";
+ctx.beginPath();
+ctx.ellipse(cx, cy + 22, 36, 10, 0, 0, Math.PI * 2);
+ctx.fill();
+ctx.strokeStyle = "#b2bec3";
+ctx.lineWidth = 2;
+ctx.stroke();
+
+ctx.fillStyle = "#d35400";
+ctx.beginPath();
+ctx.ellipse(cx, cy + 10, 22, 14, 0, 0, Math.PI * 2);
+ctx.fill();
+
+ctx.fillStyle = "#e67e22";
+ctx.beginPath();
+ctx.ellipse(cx + 14, cy + 5, 9, 6, -0.3, 0, Math.PI * 2);
+ctx.fill();
+ctx.fillStyle = "#fff";
+ctx.beginPath();
+ctx.arc(cx + 22, cy + 2, 3, 0, Math.PI * 2);
+ctx.fill();
+
+ctx.strokeStyle = "rgba(255,255,255,0.7)";
+ctx.lineWidth = 1.8;
+ctx.beginPath();
+ctx.moveTo(cx - 8, cy - 3);
+ctx.quadraticCurveTo(cx - 13, cy - 14, cx - 6, cy - 23);
+ctx.moveTo(cx + 6, cy - 3);
+ctx.quadraticCurveTo(cx + 13, cy - 14, cx + 8, cy - 23);
+ctx.stroke();
+
+ctx.restore();
+}
+
+function loop() {
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+globalSawAngle += 0.12;
+
+ctx.fillStyle = '#1e272e';
+ctx.fillRect(0, GROUND_Y, canvas.width, canvas.height - GROUND_Y);
+ctx.fillStyle = '#ff3f34';
+ctx.fillRect(0, GROUND_Y, canvas.width, 3);
+
+if (gameStarted && !gameWon) {
+if (!player.isGrounded) {
+player.vy += player.gravity;
+player.y += player.vy;
+
+if (player.y >= GROUND_Y - player.height) {
+player.y = GROUND_Y - player.height;
+player.vy = 0;
+player.isGrounded = true;
+}
+}
+}
+
+// جسيمات النار
+for (let i = player.fireParticles.length - 1; i >= 0; i--) {
+const fp = player.fireParticles[i];
+fp.px += fp.vx;
+fp.py += fp.vy;
+fp.life -= 0.05;
+fp.size *= 0.94;
+
+if (fp.life <= 0) {
+player.fireParticles.splice(i, 1);
+} else {
+ctx.fillStyle = fp.color;
+ctx.beginPath();
+ctx.arc(fp.px, fp.py, Math.max(1, fp.size), 0, Math.PI * 2);
+ctx.fill();
+}
+}
+
+// جسيمات الدخان
+for (let i = player.smokeParticles.length - 1; i >= 0; i--) {
+const sp = player.smokeParticles[i];
+sp.px += sp.vx;
+sp.py += sp.vy;
+sp.alpha -= 0.03;
+sp.size += 0.15;
+
+if (sp.alpha <= 0) {
+player.smokeParticles.splice(i, 1);
+} else {
+ctx.fillStyle = rgba(220, 220, 220, ${sp.alpha})`;
+ctx.beginPath();
+ctx.arc(sp.px, sp.py, sp.size, 0, Math.PI * 2);
+ctx.fill();
+}
+}
+
+// توليد الحواجز
+if (gameStarted && !gameOver && !gameWon) {
+if (obstaclesPassed < TARGET_OBSTACLES) {
+spawnTimer++;
+if (spawnTimer > 85) {
+spawnTimer = 0;
+const type = Math.random() > 0.5 ? 'jump' : 'duck';
+if (type === 'jump') {
+obstacles.push({
+type: 'jump',
+x: canvas.width + 20,
+y: GROUND_Y - 38,
+w: 42,
+h: 38,
+passed: false
+});
+} else {
+obstacles.push({
+type: 'duck',
+x: canvas.width + 20,
+y: GROUND_Y - 78,
+w: 44,
+h: 44,
+passed: false
+});
+}
+}
+} else if (!finishTriggered && obstacles.length === 0) {
+finishTriggered = true;
+finishLine = {
+x: canvas.width + 30,
+y: GROUND_Y - 55
+};
+}
+}
+
+// تحريك الحواجز وفحص الاصطدام
+for (let i = obstacles.length - 1; i >= 0; i--) {
+const obs = obstacles[i];
+if (!gameWon && !gameOver) {
+obs.x -= 4.8;
+}
+
+drawSpikeHazard(obs);
+
+if (!obs.passed && obs.x + obs.w < player.x) {
+obs.passed = true;
+obstaclesPassed++;
+}
+
+const pMarginX = 8;
+const pMarginY = 6;
+const playerBox = {
+left: player.x + pMarginX,
+right: player.x + player.width - pMarginX,
+top: player.y + pMarginY,
+bottom: player.y + player.height
+};
+
+const obsBox = {
+left: obs.x + 4,
+right: obs.x + obs.w - 4,
+top: obs.y + 4,
+bottom: obs.y + obs.h
+};
+
+if (
+playerBox.right > obsBox.left &&
+playerBox.left < obsBox.right &&
+playerBox.bottom > obsBox.top &&
+playerBox.top < obsBox.bottom
+) {
+gameOver = true;
+}
+
+if (obs.x < -60) obstacles.splice(i, 1);
+}
+
+// خط النهاية
+if (finishLine) {
+if (!gameWon) finishLine.x -= 3.6;
+
+drawRoastedChicken(finishLine.x + 30, finishLine.y);
+
+ctx.fillStyle = "#ff4757";
+ctx.fillRect(finishLine.x + 70, GROUND_Y - 95, 6, 95);
+ctx.fillStyle = "#ffa502";
+ctx.fillRect(finishLine.x + 35, GROUND_Y - 100, 42, 22);
+ctx.fillStyle = "#000";
+ctx.font = "bold 11px Tahoma";
+ctx.fillText("النهاية", finishLine.x + 40, GROUND_Y - 85);
+
+if (player.x + player.width >= finishLine.x + 10) {
+gameWon = true;
+stopDuck();
+}
+}
+
+// رسم كرمبة دائماً حتى على شاشة البداية
+drawKoromba(player.x, player.y, !player.isGrounded, player.isDucking, gameWon);
+
+ctx.fillStyle = '#ffa502';
+ctx.font = 'bold 14px Tahoma';
+ctx.fillText(الشفرات المجتازة:${obstaclesPassed} / ${TARGET_OBSTACLES}`, 15, 25);
+
+if (gameWon) {
+ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.fillStyle = '#f1c40f';
+ctx.font = 'bold 24px Tahoma';
+ctx.textAlign = 'center';
+ctx.fillText('مبروك يا كرمبة! 🍗🔥', canvas.width / 2, canvas.height / 2 - 15);
+ctx.fillStyle = '#fff';
+ctx.font = '15px Tahoma';
+ctx.fillText('تخطيت كل الشفرات ونلت الدجاجة المحمرة!', canvas.width / 2, canvas.height / 2 + 18);
+ctx.font = '13px Tahoma';
+ctx.fillText('اضغط على الشاشة للعب مجدداً', canvas.width / 2, canvas.height / 2 + 50);
+ctx.textAlign = 'start';
+}
+
+if (gameOver) {
+ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.fillStyle = '#ff4757';
+ctx.font = 'bold 22px Tahoma';
+ctx.textAlign = 'center';
+ctx.fillText('أصابك المنشار أو المسمار! ⚡', canvas.width / 2, canvas.height / 2 - 12);
+ctx.fillStyle = '#fff';
+ctx.font = '14px Tahoma';
+ctx.fillText('كرمبة لم يصل للدجاجة... اضغط للإعادة', canvas.width / 2, canvas.height / 2 + 20);
+ctx.textAlign = 'start';
+}
+
+requestAnimationFrame(loop);
+}
+
+// بدء الدورة الرسومية بعد اكتمال التحميل
+requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>
